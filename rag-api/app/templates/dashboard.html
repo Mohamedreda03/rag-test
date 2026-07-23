@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>لوحة تتبع الـ Pipeline والـ Tokens - RAG Engine</title>
+  <!-- Google Fonts & Tailwind CSS -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Alexandria', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#ecfdf5',
+              100: '#d1fae5',
+              400: '#34d399',
+              500: '#10b981',
+              600: '#059669',
+              900: '#064e3b',
+            },
+            darkbg: '#090d16',
+            cardbg: '#111827',
+            cardborder: '#1f2937',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #090d16;
+      color: #f3f4f6;
+      font-family: 'Alexandria', sans-serif;
+    }
+    .glass-card {
+      background: rgba(17, 24, 39, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #090d16;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #374151;
+      border-radius: 9999px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #10b981;
+    }
+  </style>
+</head>
+<body class="min-h-screen custom-scrollbar text-slate-100 flex flex-col">
+
+  <!-- Header -->
+  <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-30 px-6 py-4">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 font-bold text-slate-950 text-xl">
+          ⚡
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-white tracking-wide">لوحة تتبع الـ Pipeline وتكلفة الـ Tokens</h1>
+          <p class="text-xs text-slate-400">RAG Engine Live Tracing & Token Analytics Dashboard</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <button onclick="fetchTraces()" class="px-4 py-2 text-xs font-semibold rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition flex items-center gap-2">
+          <span>🔄</span> تحديث البيانات
+        </button>
+        <button onclick="clearTraces()" class="px-4 py-2 text-xs font-semibold rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/30 hover:bg-rose-500/20 transition flex items-center gap-2">
+          <span>🗑️</span> مسح السجل
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="max-w-7xl w-full mx-auto px-6 py-8 flex-1 flex flex-col gap-8">
+
+    <!-- KPI Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div class="glass-card p-5 rounded-2xl flex flex-col gap-1">
+        <span class="text-xs font-medium text-slate-400">إجمالي الطلبات (Requests)</span>
+        <span id="kpi-total-requests" class="text-3xl font-extrabold text-white">0</span>
+        <span class="text-[10px] text-slate-500">مكتملة في الذاكرة والحفظ</span>
+      </div>
+      <div class="glass-card p-5 rounded-2xl flex flex-col gap-1">
+        <span class="text-xs font-medium text-slate-400">Prompt Tokens (Input)</span>
+        <span id="kpi-prompt-tokens" class="text-3xl font-extrabold text-emerald-400">0</span>
+        <span class="text-[10px] text-slate-500">إجمالي الـ Input Tokens</span>
+      </div>
+      <div class="glass-card p-5 rounded-2xl flex flex-col gap-1">
+        <span class="text-xs font-medium text-slate-400">Completion Tokens (Output)</span>
+        <span id="kpi-completion-tokens" class="text-3xl font-extrabold text-teal-300">0</span>
+        <span class="text-[10px] text-slate-500">إجمالي الـ Output Tokens</span>
+      </div>
+      <div class="glass-card p-5 rounded-2xl flex flex-col gap-1">
+        <span class="text-xs font-medium text-slate-400">إجمالي الـ Tokens</span>
+        <span id="kpi-total-tokens" class="text-3xl font-extrabold text-cyan-400">0</span>
+        <span class="text-[10px] text-slate-500">Prompt + Completion</span>
+      </div>
+      <div class="glass-card p-5 rounded-2xl flex flex-col gap-1">
+        <span class="text-xs font-medium text-slate-400">متوسط وقت التنفيذ</span>
+        <span id="kpi-avg-latency" class="text-3xl font-extrabold text-amber-400">0 ms</span>
+        <span class="text-[10px] text-slate-500">Avg Pipeline Latency</span>
+      </div>
+    </div>
+
+    <!-- Filter & Search Bar -->
+    <div class="glass-card p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4">
+      <div class="flex-1 min-w-[280px] relative">
+        <input id="search-input" type="text" placeholder="ابحث بالنص في السؤال أو المعرف..." oninput="renderTable()"
+               class="w-full bg-slate-900 border border-slate-700/60 rounded-xl px-4 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition" />
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-slate-400">عدد الطلبات: <strong id="visible-count" class="text-slate-200">0</strong></span>
+      </div>
+    </div>
+
+    <!-- Traces Table -->
+    <div class="glass-card rounded-2xl overflow-hidden shadow-2xl border border-slate-800">
+      <div class="overflow-x-auto">
+        <table class="w-full text-right text-sm">
+          <thead class="bg-slate-900/80 text-xs text-slate-400 uppercase border-b border-slate-800">
+            <tr>
+              <th class="px-6 py-4">معرف التتبع (ID)</th>
+              <th class="px-6 py-4">الوقت والتاريخ</th>
+              <th class="px-6 py-4">السؤال المطروح</th>
+              <th class="px-6 py-4">الزمن (ms)</th>
+              <th class="px-6 py-4">Input Tokens</th>
+              <th class="px-6 py-4">Output Tokens</th>
+              <th class="px-6 py-4">إجمالي الـ Tokens</th>
+              <th class="px-6 py-4 text-center">الإجراءات</th>
+            </tr>
+          </thead>
+          <tbody id="traces-table-body" class="divide-y divide-slate-800/60 text-slate-300">
+            <!-- Dynamic rows inserted via JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- Trace Detail Modal Drawer -->
+  <div id="detail-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="glass-card max-w-4xl w-full max-h-[90vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl border border-slate-700">
+      <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900">
+        <div>
+          <h2 id="modal-trace-id" class="text-lg font-bold text-white font-mono">Trace Detail</h2>
+          <p id="modal-trace-question" class="text-xs text-slate-400 line-clamp-1"></p>
+        </div>
+        <button onclick="closeModal()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-lg transition">✕</button>
+      </div>
+
+      <div id="modal-content" class="p-6 overflow-y-auto custom-scrollbar space-y-6">
+        <!-- Dynamic detail steps -->
+      </div>
+
+      <div class="px-6 py-4 border-t border-slate-800 bg-slate-900 flex justify-between items-center">
+        <button onclick="downloadTraceJSON()" class="px-4 py-2 text-xs font-semibold rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/20 transition">
+          📥 تحميل Trace JSON
+        </button>
+        <button onclick="closeModal()" class="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 transition">
+          إغلاق
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let allTraces = [];
+    let currentSelectedTrace = null;
+
+    async function fetchTraces() {
+      try {
+        const res = await fetch('/traces');
+        if (res.ok) {
+          allTraces = await res.json();
+          renderDashboard();
+        }
+      } catch (err) {
+        console.error("Error fetching traces:", err);
+      }
+    }
+
+    async function clearTraces() {
+      if (!confirm("هل أنت تأكد من إمكانية مسح جميع سجلات التتبع والـ Tokens؟")) return;
+      try {
+        const res = await fetch('/traces', { method: 'DELETE' });
+        if (res.ok) {
+          allTraces = [];
+          renderDashboard();
+        }
+      } catch (err) {
+        console.error("Error clearing traces:", err);
+      }
+    }
+
+
+    function renderDashboard() {
+      // Calculate KPIs
+      const totalReq = allTraces.length;
+      let promptTok = 0;
+      let compTok = 0;
+      let totalTok = 0;
+      let totalLatency = 0;
+
+      allTraces.forEach(t => {
+        promptTok += (t.prompt_tokens || 0);
+        compTok += (t.completion_tokens || 0);
+        totalTok += (t.total_tokens || 0);
+        totalLatency += (t.duration_ms || 0);
+      });
+
+      document.getElementById('kpi-total-requests').innerText = totalReq;
+      document.getElementById('kpi-prompt-tokens').innerText = promptTok.toLocaleString();
+      document.getElementById('kpi-completion-tokens').innerText = compTok.toLocaleString();
+      document.getElementById('kpi-total-tokens').innerText = totalTok.toLocaleString();
+      document.getElementById('kpi-avg-latency').innerText = totalReq ? Math.round(totalLatency / totalReq) + ' ms' : '0 ms';
+
+      renderTable();
+    }
+
+    function renderTable() {
+      const q = document.getElementById('search-input').value.toLowerCase().trim();
+      const filtered = allTraces.filter(t => 
+        (t.question && t.question.toLowerCase().includes(q)) || 
+        (t.id && t.id.toLowerCase().includes(q))
+      );
+
+      document.getElementById('visible-count').innerText = filtered.length;
+      const tbody = document.getElementById('traces-table-body');
+      tbody.innerHTML = '';
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8" class="text-center py-12 text-slate-500">لا توجد سجلات تتبع مطابقة حتى الآن.</td>
+          </tr>
+        `;
+        return;
+      }
+
+      filtered.forEach(t => {
+        const dateStr = t.created_at ? new Date(t.created_at).toLocaleString('ar-EG') : '-';
+        const row = document.createElement('tr');
+        row.className = 'hover:bg-slate-800/40 transition cursor-pointer';
+        row.innerHTML = `
+          <td class="px-6 py-4 font-mono text-emerald-400 text-xs font-semibold">#${t.id}</td>
+          <td class="px-6 py-4 text-xs text-slate-400">${dateStr}</td>
+          <td class="px-6 py-4 text-slate-200 max-w-xs truncate font-medium" title="${t.question}">${t.question || '-'}</td>
+          <td class="px-6 py-4 text-amber-300 font-mono text-xs">${t.duration_ms ? t.duration_ms + ' ms' : '-'}</td>
+          <td class="px-6 py-4 font-mono text-xs text-emerald-400">${(t.prompt_tokens || 0).toLocaleString()}</td>
+          <td class="px-6 py-4 font-mono text-xs text-teal-300">${(t.completion_tokens || 0).toLocaleString()}</td>
+          <td class="px-6 py-4 font-mono text-xs text-cyan-400 font-bold">${(t.total_tokens || 0).toLocaleString()}</td>
+          <td class="px-6 py-4 text-center">
+            <button onclick="inspectTrace('${t.id}')" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition">
+              🔍 فحص الخطوات
+            </button>
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    async function inspectTrace(traceId) {
+      try {
+        const res = await fetch(`/traces/${traceId}`);
+        if (res.ok) {
+          currentSelectedTrace = await res.json();
+          openModal(currentSelectedTrace);
+        }
+      } catch (err) {
+        console.error("Error fetching trace detail:", err);
+      }
+    }
+
+    function openModal(t) {
+      document.getElementById('modal-trace-id').innerText = `Trace #${t.id}`;
+      document.getElementById('modal-trace-question').innerText = t.question;
+
+      const container = document.getElementById('modal-content');
+      container.innerHTML = `
+        <div class="grid grid-cols-3 gap-4 bg-slate-900 p-4 rounded-xl border border-slate-800 text-xs">
+          <div><span class="text-slate-400">إجمالي الـ Tokens:</span> <strong class="text-cyan-400 font-mono text-sm">${(t.total_tokens || 0).toLocaleString()}</strong></div>
+          <div><span class="text-slate-400">Prompt Tokens:</span> <strong class="text-emerald-400 font-mono text-sm">${(t.prompt_tokens || 0).toLocaleString()}</strong></div>
+          <div><span class="text-slate-400">Completion Tokens:</span> <strong class="text-teal-300 font-mono text-sm">${(t.completion_tokens || 0).toLocaleString()}</strong></div>
+        </div>
+
+        <h3 class="text-sm font-bold text-slate-300 mt-4 mb-2">مراحل التنفيذ (Execution Steps):</h3>
+        <div class="space-y-4">
+          ${(t.steps || []).map((step, idx) => `
+            <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center justify-center">${idx + 1}</span>
+                  <span class="font-bold text-white text-sm uppercase tracking-wider">${step.name}</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  ${step.duration_ms ? `<span class="text-xs font-mono text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">${step.duration_ms} ms</span>` : ''}
+                  ${step.tokens ? `<span class="text-xs font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md">Tokens: ${step.tokens.total_tokens}</span>` : ''}
+                </div>
+              </div>
+
+              ${step.input ? `
+                <div class="text-xs">
+                  <span class="text-slate-400 block mb-1">المدخلات (Input):</span>
+                  <pre class="bg-slate-950 p-3 rounded-lg text-slate-300 font-mono text-[11px] overflow-x-auto whitespace-pre-wrap">${escapeHtml(JSON.stringify(step.input, null, 2))}</pre>
+                </div>
+              ` : ''}
+
+              <div class="text-xs">
+                <span class="text-slate-400 block mb-1">المخرجات (Output):</span>
+                <pre class="bg-slate-950 p-3 rounded-lg text-emerald-300 font-mono text-[11px] overflow-x-auto whitespace-pre-wrap">${escapeHtml(JSON.stringify(step.output, null, 2))}</pre>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+
+      document.getElementById('detail-modal').classList.remove('hidden');
+    }
+
+    function closeModal() {
+      document.getElementById('detail-modal').classList.add('hidden');
+    }
+
+    function downloadTraceJSON() {
+      if (!currentSelectedTrace) return;
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(currentSelectedTrace, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `trace_${currentSelectedTrace.id}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // Initial fetch on page load
+    fetchTraces();
+    // Refresh automatically every 10 seconds
+    setInterval(fetchTraces, 10000);
+  </script>
+</body>
+</html>
