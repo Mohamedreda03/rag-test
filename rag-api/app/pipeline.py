@@ -276,31 +276,60 @@ class RAGPipeline:
     async def _retrieve_for(
         self, sub_question: str, use_hyde: bool, tracer: Tracer
     ) -> list[ScoredChunk]:
-        """Retrieve for one sub-question with expansion, HyDE, and CRAG-style retry."""
+        """Retrieve for one sub-question with expansion, HyDE, and CRAG-style retry.
+
+        Token optimisation:
+        - Simple (use_hyde=False): skip multi-query expansion; use the question as-is.
+        - Grade is skipped when retrieved_count >= _MIN_CHUNKS_TO_SKIP_GRADE (saves ~3 k tokens).
+        """
+        _MIN_CHUNKS_TO_SKIP_GRADE = 3
+
         started = time.perf_counter()
-        expansions = await self._decomposer.expand(sub_question)
+
+        # ------------------------------------------------------------------
+        # Expansion: 3 paraphrases only for non-simple / hyde-enabled paths.
+        # For simple questions the original question is sufficient.
+        # ------------------------------------------------------------------
+        if use_hyde:
+            expansions = await self._decomposer.expand(sub_question)
+        else:
+            expansions = []  # skip expansion for simple questions
+
         queries = [sub_question, *expansions]
         hyde_passage = None
         if use_hyde:
             hyde_passage = await self._decomposer.hyde(sub_question)
             if hyde_passage:
                 queries.append(hyde_passage)
+
         chunks = await self._retriever.retrieve_many(queries)
-        grade = await self._grader.grade(sub_question, chunks)
+
+        # ------------------------------------------------------------------
+        # Grade: skip the LLM grader when retrieval already found enough
+        # chunks — saves ~3 000 tokens per sub-question.
+        # ------------------------------------------------------------------
         rewritten_queries: list[str] = []
-        retries = 0
-        while not grade.sufficient and retries < self._settings.max_retrieval_retries:
-            rewritten_queries.append(grade.rewritten_query)
-            extra = await self._retriever.retrieve_many([grade.rewritten_query])
-            chunks = self._retriever.merge([chunks, extra])
+        if len(chunks) >= _MIN_CHUNKS_TO_SKIP_GRADE:
+            # Retrieval is sufficient; no need to grade or retry.
+            grade_sufficient = True
+        else:
             grade = await self._grader.grade(sub_question, chunks)
-            retries += 1
+            grade_sufficient = grade.sufficient
+            retries = 0
+            while not grade_sufficient and retries < self._settings.max_retrieval_retries:
+                rewritten_queries.append(grade.rewritten_query)
+                extra = await self._retriever.retrieve_many([grade.rewritten_query])
+                chunks = self._retriever.merge([chunks, extra])
+                grade = await self._grader.grade(sub_question, chunks)
+                grade_sufficient = grade.sufficient
+                retries += 1
+
         tracer.add_step(
             "retrieval",
             {
                 "expanded_queries": expansions,
                 "hyde_passage": hyde_passage,
-                "grader_sufficient": grade.sufficient,
+                "grader_sufficient": grade_sufficient,
                 "rewritten_queries": rewritten_queries,
                 "retrieved_count": len(chunks),
                 "retrieved": chunk_summaries(chunks[:10]),
